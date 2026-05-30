@@ -1,0 +1,959 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { initializeApp } from 'firebase/app';
+import { 
+  getAuth, 
+  signInAnonymously, 
+  signInWithCustomToken, 
+  onAuthStateChanged 
+} from 'firebase/auth';
+import { 
+  getFirestore, 
+  collection, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  onSnapshot, 
+  addDoc, 
+  updateDoc, 
+  deleteDoc,
+  query
+} from 'firebase/firestore';
+
+// --- ICON COMPONENTS (Inline SVGs for reliable lucide-react fallbacks) ---
+const Icons = {
+  CloudUpload: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-cloud-upload"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M12 12v9"/><path d="m16 16-4-4-4 4"/></svg>
+  ),
+  Globe: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-globe"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20"/><path d="M2 12h20"/></svg>
+  ),
+  Code: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-code"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+  ),
+  ExternalLink: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-external-link"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></svg>
+  ),
+  Trash: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-trash-2"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>
+  ),
+  Sparkles: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-sparkles"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+  ),
+  Plus: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-plus"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+  ),
+  Download: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-download"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></svg>
+  ),
+  Eye: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-eye"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>
+  ),
+  FileText: () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-file-text"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
+  )
+};
+
+// --- DEFAULT BOOTSTRAP WEBSITE TEMPLATE ---
+const DEFAULT_HTML_TEMPLATE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My High Traffic Tech Blog</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: #f3f4f6;
+            color: #1f2937;
+        }
+        header {
+            background-color: #4f46e5;
+            color: white;
+            padding: 2rem 1rem;
+            text-align: center;
+        }
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 1rem;
+        }
+        .article {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+        h2 { color: #3730a3; margin-top: 0; }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>Code & Capital</h1>
+        <p>Your guide to web development & automated monetization</p>
+    </header>
+
+    <div class="container">
+        <!-- TOP AD PLACEMENT placeholder -->
+        <div id="top-ad-spot"></div>
+
+        <div class="article">
+            <h2>The Future of Zero-Config Jamstack Hosting</h2>
+            <p>Deploying static websites has never been easier. With platforms supporting custom header configurations, automated code injection, and edge-native routing, creators can ship experiences instantly.</p>
+            <p>By coupling global CDN hosting with optimized monetization blocks (like Google AdSense), micro-publishers are generating substantial passive yield on simple content projects.</p>
+        </div>
+
+        <!-- MID AD PLACEMENT placeholder -->
+        <div id="mid-ad-spot"></div>
+
+        <div class="article">
+            <h2>Why Static HTML Outperforms Heavy Backends</h2>
+            <p>Static sites render immediately, enjoy near-perfect lighthouse scores, and cost virtually nothing to distribute over worldwide CDN edges. No servers to patch, no databases to crash.</p>
+        </div>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 Code & Capital. Built on StaticHoster.</p>
+    </footer>
+
+</body>
+</html>`;
+
+// --- MAIN REACT APPLICATION ---
+export default function App() {
+  // State variables
+  const [user, setUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('host'); // 'host' | 'deployments' | 'adsense-config'
+  const [deployments, setDeployments] = useState([]);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [uploadMethod, setUploadMethod] = useState('editor'); // 'editor' | 'file'
+  
+  // Site Metadata States
+  const [siteName, setSiteName] = useState('monetized-blog');
+  const [customSubdomain, setCustomSubdomain] = useState('');
+  const [htmlCode, setHtmlCode] = useState(DEFAULT_HTML_TEMPLATE);
+  const [notification, setNotification] = useState(null);
+
+  // AdSense & Netlify Injection Config States
+  const [adsenseEnabled, setAdsenseEnabled] = useState(true);
+  const [publisherId, setPublisherId] = useState('pub-1234567890123456');
+  const [adSlotId, setAdSlotId] = useState('9876543210');
+  const [injectionTarget, setInjectionTarget] = useState('auto'); // 'head' | 'auto' | 'custom-div'
+  const [customDivId, setCustomDivId] = useState('top-ad-spot');
+  
+  // Custom headers simulating Netlify custom configuration headers
+  const [customHeaders, setCustomHeaders] = useState('/*\n  X-Frame-Options: DENY\n  X-XSS-Protection: 1; mode=block');
+
+  // Preview Iframe Ref
+  const previewIframeRef = useRef(null);
+
+  // --- FIREBASE INITIALIZATION & SYNC ---
+  useEffect(() => {
+    let db, auth, appId;
+    try {
+      const firebaseConfig = JSON.parse(window.__firebase_config);
+      const app = initializeApp(firebaseConfig);
+      auth = getAuth(app);
+      db = getFirestore(app);
+      appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'static-hoster';
+    } catch (e) {
+      console.error("Firebase setup failed, using offline fallback", e);
+    }
+
+    const initAuthAndSync = async () => {
+      if (!auth || !db) return;
+
+      // 1. Authenticate
+      try {
+        if (typeof window.__initial_auth_token !== 'undefined' && window.__initial_auth_token) {
+          await signInWithCustomToken(auth, window.__initial_auth_token);
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) {
+        console.error("Authentication error", err);
+      }
+
+      // 2. Auth State Observer
+      onAuthStateChanged(auth, (currentUser) => {
+        setUser(currentUser);
+        if (currentUser) {
+          // Listen to dynamic deployments list
+          // RULE 1: /artifacts/{appId}/public/data/{collectionName}
+          const deploymentsRef = collection(db, 'artifacts', appId, 'public', 'data', 'deployments');
+          const unsubscribe = onSnapshot(
+            deploymentsRef,
+            (snapshot) => {
+              const loadedDeployments = [];
+              snapshot.forEach((doc) => {
+                const data = doc.data();
+                if (data.userId === currentUser.uid) {
+                  loadedDeployments.push({ id: doc.id, ...data });
+                }
+              });
+              // Sort by date descending
+              loadedDeployments.sort((a, b) => b.deployedAt - a.deployedAt);
+              setDeployments(loadedDeployments);
+            },
+            (error) => {
+              console.error("Firestore loading failed: ", error);
+            }
+          );
+          return () => unsubscribe();
+        }
+      });
+    };
+
+    initAuthAndSync();
+    // Auto-generate random sub-domain on startup
+    setCustomSubdomain(Math.random().toString(36).substring(2, 8));
+  }, []);
+
+  // Show Toast Messages
+  const showToast = (message, type = 'success') => {
+    setNotification({ text: message, type });
+    setTimeout(() => {
+      setNotification(null);
+    }, 4500);
+  };
+
+  // --- HTML / ADSENSE CODE INJECTION ALGORITHM ---
+  const injectAdSense = (rawHtml) => {
+    if (!adsenseEnabled) return rawHtml;
+
+    // Generated target scripts
+    const adScriptHeader = `<!-- Google AdSense Auto-Injected Code -->\n<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${publisherId}" crossorigin="anonymous"></script>\n`;
+    
+    const adUnitMarkup = `
+<!-- Google AdSense Responsive Display Ad Unit -->
+<div class="adsense-container" style="margin: 1.5rem auto; text-align: center; max-width: 100%;">
+    <ins class="adsbygoogle"
+         style="display:block; min-height:90px;"
+         data-ad-client="${publisherId}"
+         data-ad-slot="${adSlotId}"
+         data-ad-format="auto"
+         data-full-width-responsive="true"></ins>
+    <script>
+         (adsbygoogle = window.adsbygoogle || []).push({});
+    </script>
+</div>\n`;
+
+    let processedHtml = rawHtml;
+
+    // Place script tag into <head>
+    if (processedHtml.includes('</head>')) {
+      processedHtml = processedHtml.replace('</head>', `${adScriptHeader}</head>`);
+    } else {
+      // Fallback: prepend if no head tags
+      processedHtml = adScriptHeader + processedHtml;
+    }
+
+    // Place the visual Ad unit block
+    if (injectionTarget === 'auto') {
+      // Best practices: Inject right after first paragraph or article element
+      if (processedHtml.includes('</p>')) {
+        processedHtml = processedHtml.replace('</p>', `</p>${adUnitMarkup}`);
+      } else if (processedHtml.includes('<body>')) {
+        processedHtml = processedHtml.replace('<body>', `<body>${adUnitMarkup}`);
+      } else {
+        processedHtml += adUnitMarkup;
+      }
+    } else if (injectionTarget === 'custom-div' && customDivId) {
+      const targetString = `id="${customDivId}"`;
+      if (processedHtml.includes(targetString)) {
+        // Target index directly inside the placeholder element
+        processedHtml = processedHtml.replace(
+          new RegExp(`id="${customDivId}"[^>]*>`, 'g'),
+          (match) => `${match}\n${adUnitMarkup}`
+        );
+      } else {
+        // Warning: Placeholder not found, fallback to auto body injection
+        if (processedHtml.includes('<body>')) {
+          processedHtml = processedHtml.replace('<body>', `<body>${adUnitMarkup}\n<div style="background:#fff3cd; color:#856404; padding:8px; font-size:12px; border:1px solid #ffeeba; border-radius:4px; text-align:center;">[AdSense Alert: Target Container id="${customDivId}" was not found! Injected ad unit natively instead]</div>`);
+        }
+      }
+    } else {
+      // Simply inject into Head only for Auto-Ads model
+      // Already injected above, nothing extra to place
+    }
+
+    return processedHtml;
+  };
+
+  // --- COMPILING & UPDATING THE RE-RENDER IFRAME ---
+  useEffect(() => {
+    const handleUpdatePreview = () => {
+      const previewIframe = previewIframeRef.current;
+      if (!previewIframe) return;
+
+      const finalRenderableCode = injectAdSense(htmlCode);
+      const iframeDoc = previewIframe.contentDocument || previewIframe.contentWindow.document;
+      
+      iframeDoc.open();
+      iframeDoc.write(finalRenderableCode);
+      iframeDoc.close();
+    };
+
+    const timer = setTimeout(handleUpdatePreview, 400);
+    return () => clearTimeout(timer);
+  }, [htmlCode, adsenseEnabled, publisherId, adSlotId, injectionTarget, customDivId]);
+
+  // --- UPLOAD HANDLERS ---
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        setHtmlCode(event.target.result);
+        setSiteName(file.name.replace(/\.[^/.]+$/, ""));
+        showToast(`Parsed single-page static HTML file: ${file.name}`);
+      };
+      reader.readAsText(file);
+    } else {
+      showToast("We currently support pure HTML static files directly in-browser. ZIP directory builder ready on Deploy!", "warning");
+    }
+  };
+
+  // --- TRIGGER PRODUCTION DEPLOYMENT ---
+  const handleDeploy = async () => {
+    if (!siteName.trim()) {
+      showToast("Please provide a site name for the static host.", "warning");
+      return;
+    }
+    if (!customSubdomain.trim()) {
+      showToast("Subdomains cannot be empty.", "warning");
+      return;
+    }
+
+    setIsDeploying(true);
+    const cleanedSubdomain = customSubdomain.toLowerCase().replace(/[^a-z0-9-]/g, '');
+
+    const finalHtml = injectAdSense(htmlCode);
+    const deploymentId = `${cleanedSubdomain}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    const newDeployment = {
+      siteName: siteName,
+      subdomain: cleanedSubdomain,
+      deploymentId: deploymentId,
+      originalCode: htmlCode,
+      liveCode: finalHtml,
+      adsenseEnabled: adsenseEnabled,
+      publisherId: adsenseEnabled ? publisherId : '',
+      adSlotId: adsenseEnabled ? adSlotId : '',
+      headers: customHeaders,
+      deployedAt: Date.now(),
+      userId: user ? user.uid : 'anonymous',
+    };
+
+    // --- FIRESTORE PERSISTENCE PIPELINE (RULE 1 & 3) ---
+    let db, appId;
+    try {
+      const firebaseConfig = JSON.parse(window.__firebase_config);
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'static-hoster';
+    } catch(e) {
+      console.warn("Could not load Firebase. Simulating secure offline host.");
+    }
+
+    if (user && db) {
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'deployments', deploymentId);
+        await setDoc(docRef, newDeployment);
+      } catch (error) {
+        console.error("Firestore upload failed", error);
+      }
+    }
+
+    // Always update local state immediately so application functions offline beautifully
+    setDeployments((prev) => [newDeployment, ...prev]);
+
+    setTimeout(() => {
+      setIsDeploying(false);
+      showToast(`Website deployed successfully! Accessible via static simulation.`, 'success');
+      setActiveTab('deployments');
+    }, 1500);
+  };
+
+  // Delete site deployment
+  const handleDeleteDeployment = async (depId) => {
+    let db, appId;
+    try {
+      const firebaseConfig = JSON.parse(window.__firebase_config);
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+      appId = typeof window.__app_id !== 'undefined' ? window.__app_id : 'static-hoster';
+    } catch(e) {}
+
+    if (user && db) {
+      try {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'deployments', depId);
+        await deleteDoc(docRef);
+      } catch (err) {
+        console.error("Firebase deletion failed", err);
+      }
+    }
+
+    setDeployments((prev) => prev.filter(dep => dep.deploymentId !== depId));
+    showToast("Deployment deleted successfully.");
+  };
+
+  // Download raw package formatted with injection headers for Netlify/Vercel
+  const downloadBundleZip = (originalCode, liveCode, siteTitle) => {
+    const textToDownload = liveCode;
+    const element = document.createElement("a");
+    const file = new Blob([textToDownload], {type: 'text/html'});
+    element.href = URL.createObjectURL(file);
+    element.download = `${siteTitle || 'monetized-static-site'}-index.html`;
+    document.body.appendChild(element);
+    element.click();
+    document.body.removeChild(element);
+    showToast("Downloaded HTML file bundle ready for any static CDN!");
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+      
+      {/* Toast Notifications */}
+      {notification && (
+        <div className={`fixed top-5 right-5 z-50 px-5 py-3 rounded-xl shadow-2xl transition-all border transform translate-y-0 flex items-center gap-3 ${
+          notification.type === 'success' 
+            ? 'bg-emerald-950 border-emerald-500 text-emerald-200' 
+            : 'bg-amber-950 border-amber-500 text-amber-200'
+        }`}>
+          <Icons.Sparkles />
+          <span className="font-medium text-sm">{notification.text}</span>
+        </div>
+      )}
+
+      {/* --- HEADER --- */}
+      <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-40">
+        <div className="max-w-7xl mx-auto px-4 py-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="bg-indigo-600 p-2.5 rounded-xl text-white shadow-lg shadow-indigo-500/20">
+              <Icons.Globe />
+            </div>
+            <div>
+              <h1 className="text-xl font-bold tracking-tight bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent">
+                AdSense StaticHoster
+              </h1>
+              <p className="text-xs text-slate-400">Deploy Static Content & Inject Ad Codes Automatically</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setActiveTab('host')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'host' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              🚀 Deploys & Engine
+            </button>
+            <button
+              onClick={() => setActiveTab('deployments')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all relative ${
+                activeTab === 'deployments' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              📂 Active Hosts
+              {deployments.length > 0 && (
+                <span className="absolute -top-1 -right-1.5 bg-cyan-500 text-slate-950 text-[10px] font-bold w-5 h-5 rounded-full flex items-center justify-center border-2 border-slate-900">
+                  {deployments.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setActiveTab('adsense-config')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                activeTab === 'adsense-config' 
+                  ? 'bg-indigo-600 text-white shadow-md' 
+                  : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              🪙 AdSense Setup
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* --- WORKSPACE CORE PANEL --- */}
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-6">
+        
+        {/* TAB 1: SITE CREATOR & ADVANCED ENGINE */}
+        {activeTab === 'host' && (
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            
+            {/* Left Control Column: Setup, Files, Ad Integration Options */}
+            <div className="lg:col-span-5 space-y-6 flex flex-col">
+              
+              {/* Site Setup card */}
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Icons.Plus /> Configuration Details
+                </h3>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Project Display Name</label>
+                    <input 
+                      type="text" 
+                      value={siteName}
+                      onChange={(e) => setSiteName(e.target.value)}
+                      placeholder="e.g. My Portfolio"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100 focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Subdomain Name</label>
+                    <div className="flex rounded-lg overflow-hidden border border-slate-700">
+                      <input 
+                        type="text" 
+                        value={customSubdomain}
+                        onChange={(e) => setCustomSubdomain(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                        className="w-full bg-slate-900 px-3 py-2 text-sm text-indigo-300 font-mono focus:outline-none"
+                      />
+                      <span className="bg-slate-700 text-slate-300 px-2 py-2 text-xs flex items-center">.sh</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-700/60 pt-4">
+                  <span className="block text-xs font-semibold text-slate-400 mb-2">Deploy Package Entrypoint</span>
+                  <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 rounded-lg">
+                    <button
+                      onClick={() => setUploadMethod('editor')}
+                      className={`py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
+                        uploadMethod === 'editor' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Use Custom Sandbox Code
+                    </button>
+                    <button
+                      onClick={() => setUploadMethod('file')}
+                      className={`py-1.5 px-3 rounded-md text-xs font-medium transition-all ${
+                        uploadMethod === 'file' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Upload Static File (.html)
+                    </button>
+                  </div>
+                </div>
+
+                {uploadMethod === 'file' && (
+                  <div className="p-4 border-2 border-dashed border-slate-700 rounded-lg text-center bg-slate-900/50 hover:bg-slate-900 transition-colors cursor-pointer relative">
+                    <input 
+                      type="file" 
+                      accept=".html,.htm" 
+                      onChange={handleFileUpload}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <div className="flex flex-col items-center gap-2">
+                      <Icons.CloudUpload />
+                      <span className="text-xs text-slate-300 font-medium">Click to select or drop an HTML file</span>
+                      <span className="text-[10px] text-slate-500">Pure web assets will parse into deployment engine</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic In-House Adsense Injector configuration */}
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                    <Icons.Sparkles /> Real AdSense Pipeline
+                  </h3>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={adsenseEnabled} 
+                      onChange={() => setAdsenseEnabled(!adsenseEnabled)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:width-4 after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
+                  </label>
+                </div>
+
+                {adsenseEnabled ? (
+                  <div className="space-y-4">
+                    <div className="p-3 bg-emerald-950/40 border border-emerald-500/30 rounded-lg text-xs text-emerald-300">
+                      AdSense engine is <strong>Enabled</strong>. Google auto-ads loading scripts, optimization, and banner code blocks will automatically be parsed and injected into your site code.
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-400 mb-1.5">Google AdSense Publisher ID</label>
+                      <input 
+                        type="text" 
+                        value={publisherId}
+                        onChange={(e) => setPublisherId(e.target.value)}
+                        placeholder="pub-XXXXXXXXXXXXXXXX"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none focus:border-indigo-500"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Ad Slot ID (Banner)</label>
+                        <input 
+                          type="text" 
+                          value={adSlotId}
+                          onChange={(e) => setAdSlotId(e.target.value)}
+                          placeholder="9876543210"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-100 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Injection Strategy</label>
+                        <select
+                          value={injectionTarget}
+                          onChange={(e) => setInjectionTarget(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-2 text-xs text-slate-100 focus:outline-none"
+                        >
+                          <option value="auto">Auto-Insert Body</option>
+                          <option value="custom-div">Target Specific Div ID</option>
+                          <option value="head">Auto Ads Head-Only</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {injectionTarget === 'custom-div' && (
+                      <div className="animate-fadeIn">
+                        <label className="block text-xs font-semibold text-slate-400 mb-1.5">Target HTML Div ID</label>
+                        <div className="flex gap-2">
+                          <span className="bg-slate-700 text-slate-300 px-3 py-2 text-xs rounded-l-lg flex items-center">#</span>
+                          <input 
+                            type="text" 
+                            value={customDivId}
+                            onChange={(e) => setCustomDivId(e.target.value)}
+                            placeholder="top-ad-spot"
+                            className="w-full bg-slate-900 border-y border-r border-slate-700 rounded-r-lg px-3 py-1.5 text-xs font-mono text-slate-100 focus:outline-none"
+                          />
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-1">
+                          Make sure you have an HTML container matching this tag, e.g., <code>{"<div id=\"" + customDivId + "\"></div>"}</code>
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-900/50 rounded-lg border border-slate-700/50 text-center">
+                    <p className="text-xs text-slate-400">AdSense injection disabled. Your site will deploy without commercial banners.</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Netlify/Server Header Injector Setup */}
+              <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-5 space-y-3">
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <Icons.FileText /> Netlify Custom Headers
+                </h3>
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  We programmatically generate Netlify-compatible <code>_headers</code> and custom files during build packaging. Add custom rules for security or proxies here:
+                </p>
+                <textarea
+                  value={customHeaders}
+                  onChange={(e) => setCustomHeaders(e.target.value)}
+                  rows={3}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              {/* ACTION DEPLOYMENT BUTTON */}
+              <button
+                onClick={handleDeploy}
+                disabled={isDeploying}
+                className={`w-full py-3 px-6 rounded-xl font-bold text-sm tracking-wide transition-all shadow-xl flex items-center justify-center gap-2 ${
+                  isDeploying 
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed' 
+                    : 'bg-gradient-to-r from-indigo-500 to-cyan-500 hover:from-indigo-600 hover:to-cyan-600 text-slate-950 hover:shadow-cyan-500/10 hover:shadow-lg'
+                }`}
+              >
+                {isDeploying ? (
+                  <>
+                    <svg className="animate-spin h-5 w-5 text-slate-400" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                    Executing Code Ad-Injections...
+                  </>
+                ) : (
+                  <>
+                    🚀 Trigger Production Deployment
+                  </>
+                )}
+              </button>
+            </div>
+
+            {/* Right Interactive Coding Sandbox & Real-time Live Sandbox Frame */}
+            <div className="lg:col-span-7 flex flex-col space-y-6">
+              
+              {/* Sandbox Editor Tab Toggle */}
+              <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl overflow-hidden flex flex-col h-[580px] shadow-2xl">
+                <div className="bg-slate-900 px-4 py-3 border-b border-slate-700 flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <div className="w-3 h-3 rounded-full bg-rose-500" />
+                    <div className="w-3 h-3 rounded-full bg-amber-500" />
+                    <div className="w-3 h-3 rounded-full bg-emerald-500" />
+                    <span className="text-xs text-slate-400 ml-2 font-mono">Sandbox Sandbox Code Editor</span>
+                  </div>
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => downloadBundleZip(htmlCode, injectAdSense(htmlCode), siteName)}
+                      className="px-2.5 py-1 bg-slate-800 text-slate-300 rounded hover:bg-slate-700 text-xs flex items-center gap-1 transition"
+                    >
+                      <Icons.Download /> Get HTML
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex-1 grid grid-rows-2 sm:grid-rows-1 sm:grid-cols-2">
+                  
+                  {/* Code Editor half */}
+                  <div className="flex flex-col border-b sm:border-b-0 sm:border-r border-slate-700">
+                    <div className="bg-slate-900/40 px-3 py-1.5 border-b border-slate-700 text-[10px] text-indigo-300 font-mono flex items-center justify-between">
+                      <span>HTML Input (Live edit)</span>
+                    </div>
+                    <textarea
+                      value={htmlCode}
+                      onChange={(e) => setHtmlCode(e.target.value)}
+                      className="flex-1 w-full bg-slate-950 p-4 text-xs font-mono text-slate-300 resize-none focus:outline-none focus:ring-0 leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Real-time Preview half with Simulated Adsense */}
+                  <div className="flex flex-col bg-white">
+                    <div className="bg-slate-900 px-3 py-1.5 border-b border-slate-700 text-[10px] text-emerald-400 font-mono flex items-center justify-between">
+                      <span>Instant Preview Canvas</span>
+                      <span className="text-[9px] text-slate-400">Rendering auto-adsense simulation</span>
+                    </div>
+                    <div className="flex-1 relative bg-white">
+                      <iframe 
+                        ref={previewIframeRef}
+                        title="Website Sandbox"
+                        className="w-full h-full border-none"
+                      />
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
+        {/* TAB 2: ACTIVE DEPLOYMENTS & LIVE HOST SIMULATION */}
+        {activeTab === 'deployments' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-800/40 p-6 rounded-2xl border border-slate-700/60">
+              <div>
+                <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                  <Icons.Globe /> Production CDN Deployments
+                </h2>
+                <p className="text-xs text-slate-400 mt-1">
+                  A list of active websites configured with the Netlify ad-insertion payload and hosted on static endpoints.
+                </p>
+              </div>
+              <button 
+                onClick={() => setActiveTab('host')}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-xs px-4 py-2.5 rounded-lg transition shadow"
+              >
+                + Deploy New Project
+              </button>
+            </div>
+
+            {deployments.length === 0 ? (
+              <div className="bg-slate-800/20 border border-slate-800/80 rounded-2xl p-12 text-center max-w-lg mx-auto">
+                <div className="bg-slate-800/80 p-4 rounded-full w-14 h-14 flex items-center justify-center mx-auto mb-4 text-indigo-400">
+                  <Icons.CloudUpload />
+                </div>
+                <h4 className="font-semibold text-sm text-slate-200">No active websites hosted yet</h4>
+                <p className="text-xs text-slate-400 mt-1.5 max-w-xs mx-auto">
+                  Design or paste code inside the Deployment Sandbox, customize your AdSense IDs, and launch a live link instantly.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {deployments.map((deployment) => (
+                  <div 
+                    key={deployment.deploymentId} 
+                    className="bg-slate-800/50 border border-slate-700/60 rounded-2xl p-5 flex flex-col justify-between hover:border-slate-600/80 transition-all shadow-xl"
+                  >
+                    <div>
+                      <div className="flex justify-between items-start gap-4">
+                        <div>
+                          <span className="inline-block bg-slate-700/50 text-indigo-300 font-mono text-[9px] font-bold px-2 py-0.5 rounded uppercase tracking-wider mb-2">
+                            STATIC CDN
+                          </span>
+                          <h4 className="font-bold text-lg text-slate-100 leading-snug">{deployment.siteName}</h4>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => downloadBundleZip(deployment.originalCode, deployment.liveCode, deployment.siteName)}
+                            title="Download deployment file"
+                            className="p-1.5 bg-slate-700/50 hover:bg-slate-700 rounded-lg text-slate-300 transition"
+                          >
+                            <Icons.Download />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteDeployment(deployment.deploymentId)}
+                            title="Tear down deployment"
+                            className="p-1.5 bg-rose-950/40 hover:bg-rose-900 rounded-lg text-rose-300 transition"
+                          >
+                            <Icons.Trash />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* URL Display */}
+                      <div className="mt-4 p-3 bg-slate-900 rounded-lg flex items-center justify-between border border-slate-800">
+                        <span className="font-mono text-xs text-cyan-400 truncate">
+                          https://{deployment.subdomain}.staticweb.host
+                        </span>
+                        <a 
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            // Open virtual simulated hosting window
+                            const win = window.open();
+                            win.document.open();
+                            win.document.write(deployment.liveCode);
+                            win.document.close();
+                            win.document.title = `${deployment.siteName} (Live Host)`;
+                          }}
+                          className="p-1 bg-slate-800 hover:bg-slate-700 rounded text-slate-400 hover:text-slate-200 transition"
+                          title="Open live hosted page"
+                        >
+                          <Icons.ExternalLink />
+                        </a>
+                      </div>
+
+                      <div className="mt-4 grid grid-cols-2 gap-4 text-[11px] text-slate-400">
+                        <div>
+                          <span className="block text-[9px] uppercase font-bold tracking-wider text-slate-500">Status</span>
+                          <span className="text-emerald-400 flex items-center gap-1.5 font-medium mt-0.5">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Active Global Edge
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] uppercase font-bold tracking-wider text-slate-500">Ad Injected</span>
+                          <span className="text-indigo-300 font-medium mt-0.5">
+                            {deployment.adsenseEnabled ? 'Google AdSense Active' : 'No Ads'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-slate-700/60 pt-4 mt-5 flex items-center justify-between text-[10px] text-slate-500">
+                      <span>Deployment ID: {deployment.deploymentId}</span>
+                      <span>{new Date(deployment.deployedAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: ADSENSE DETAILED TUTORIAL & CONFIGURATION */}
+        {activeTab === 'adsense-config' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-slate-800/40 p-6 rounded-2xl border border-slate-700/60 space-y-3">
+              <h2 className="text-xl font-bold text-slate-100 flex items-center gap-2">
+                <Icons.Sparkles /> Demystifying the Automated AdSense Injection
+              </h2>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Google AdSense typically requires static websites to insert specific asynchronous JavaScript tag identifiers inside the HTML document head. Many content creators do this manually, but Netlify injection engines allow you to automatically load these tags dynamically on deploy without polluting your dev files.
+              </p>
+            </div>
+
+            <div className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-6 space-y-6">
+              
+              <div>
+                <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider mb-3">How it works</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <span className="block text-xs font-bold text-slate-200 mb-1">1. Parse & Scan</span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">Our engine scans your static site structure to identify the perfect head insertion tag point.</p>
+                  </div>
+                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <span className="block text-xs font-bold text-slate-200 mb-1">2. Inject Auto-Ads</span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">The Google asynchronous library is safely injected alongside your unique Publisher ID.</p>
+                  </div>
+                  <div className="p-3 bg-slate-900 rounded-lg border border-slate-800">
+                    <span className="block text-xs font-bold text-slate-200 mb-1">3. Deliver & Monetize</span>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">The production-ready build with live adsense assets is loaded securely across global edge-servers.</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700/60 pt-5 space-y-4">
+                <h3 className="text-sm font-bold text-indigo-400 uppercase tracking-wider">Configure AdSense Settings</h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Default Publisher Account ID</label>
+                    <input 
+                      type="text" 
+                      value={publisherId}
+                      onChange={(e) => setPublisherId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-400 mb-1.5">Target Banner Ad Slot</label>
+                    <input 
+                      type="text" 
+                      value={adSlotId}
+                      onChange={(e) => setAdSlotId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs font-mono text-slate-200 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="p-4 bg-slate-900 rounded-xl border border-slate-800 text-xs text-slate-300">
+                  <span className="block font-bold text-indigo-300 mb-1">AdSense Best Practices:</span>
+                  <ul className="list-disc pl-5 space-y-1.5 text-slate-400">
+                    <li>Never click your own live ad units inside deployments.</li>
+                    <li>Ensure your site has adequate content depth to be verified and accepted by the official Google AdSense reviewer team.</li>
+                    <li>Avoid spam layout designs or excessive non-content-centric block displays.</li>
+                  </ul>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+      </main>
+
+      {/* --- FOOTER --- */}
+      <footer className="border-t border-slate-800 py-6 bg-slate-950 mt-12 text-xs text-slate-500">
+        <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
+          <p>© 2026 AdSense StaticHoster Inc. Real Static CDN Simulator Engine.</p>
+          <p className="flex items-center gap-1">
+            Build robust static sites instantly. All rights reserved.
+          </p>
+        </div>
+      </footer>
+
+    </div>
+  );
+}
